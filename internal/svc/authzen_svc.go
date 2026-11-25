@@ -53,6 +53,11 @@ func (aas *AuthzenAuthorizationService) AccessEvaluation(ctx context.Context, r 
 	log := logging.ReqScopeLog(ctx)
 
 	includeMeta := metaRequested(r.Context)
+	actionName := r.GetAction().GetName()
+	if err := util.ValidateAction(actionName); err != nil {
+		log.Error("Invalid action", zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+	}
 
 	// Extract auxData
 	auxData, err := aas.extractAuxData(ctx, r.GetContext())
@@ -64,7 +69,7 @@ func (aas *AuthzenAuthorizationService) AccessEvaluation(ctx context.Context, r 
 	// Build engine input
 	input := &enginev1.CheckInput{
 		RequestId: lookupOrEmptyString(r.GetContext(), "requestId"),
-		Actions:   []string{r.Action.GetName()},
+		Actions:   []string{actionName},
 		Principal: toPrincipal(r.Subject),
 		Resource:  toResource(r.Resource),
 		AuxData:   auxData,
@@ -74,15 +79,18 @@ func (aas *AuthzenAuthorizationService) AccessEvaluation(ctx context.Context, r 
 	outputs, err := aas.eng.Check(logging.ToContext(ctx, log), []*enginev1.CheckInput{input})
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
-		if errors.Is(err, compile.PolicyCompilationErr{}) {
+		switch {
+		case errors.Is(err, util.ErrInvalidAction):
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+		case errors.Is(err, compile.PolicyCompilationErr{}):
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
+		default:
+			return nil, status.Errorf(codes.Internal, "Policy check failed")
 		}
-		return nil, status.Errorf(codes.Internal, "Policy check failed")
 	}
 
 	return tracing.RecordSpan2(ctx, "assemble_response", func(_ context.Context, _ trace.Span) (*svcv1.AccessEvaluationResponse, error) {
 		output := outputs[0]
-		actionName := r.Action.GetName()
 		decision := output.Actions[actionName].Effect == effectv1.Effect_EFFECT_ALLOW
 		response := &svcv1.AccessEvaluationResponse{
 			Decision: &decision,
@@ -169,6 +177,13 @@ func (aas *AuthzenAuthorizationService) AccessEvaluationBatch(ctx context.Contex
 		}
 	}
 
+	for i, eval := range evals {
+		if err := util.ValidateAction(eval.action.GetName()); err != nil {
+			log.Error("Invalid action", zap.Error(err), zap.Int("evaluation_index", i))
+			return nil, status.Errorf(codes.InvalidArgument, "evaluation %d: %s", i, err)
+		}
+	}
+
 	// Group evaluations by (subject, auxData) to process efficiently
 	type groupKey struct {
 		subjectID   string
@@ -250,10 +265,14 @@ func (aas *AuthzenAuthorizationService) AccessEvaluationBatch(ctx context.Contex
 		outputs, err := aas.eng.Check(logging.ToContext(ctx, log), inputs)
 		if err != nil {
 			log.Error("Policy check failed", zap.Error(err))
-			if errors.Is(err, compile.PolicyCompilationErr{}) {
+			switch {
+			case errors.Is(err, util.ErrInvalidAction):
+				return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+			case errors.Is(err, compile.PolicyCompilationErr{}):
 				return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
+			default:
+				return nil, status.Errorf(codes.Internal, "Policy check failed")
 			}
-			return nil, status.Errorf(codes.Internal, "Policy check failed")
 		}
 
 		var retCtx map[string]*structpb.Value

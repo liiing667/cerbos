@@ -26,6 +26,7 @@ import (
 	"github.com/cerbos/cerbos/internal/ruletable/internal"
 	"github.com/cerbos/cerbos/internal/ruletable/planner"
 	"github.com/cerbos/cerbos/internal/schema"
+	"github.com/cerbos/cerbos/internal/util"
 )
 
 func (rt *RuleTable) Plan(ctx context.Context, conf *evaluator.Conf, schemaMgr schema.Manager, input *enginev1.PlanResourcesInput, opts ...evaluator.CheckOpt) (*enginev1.PlanResourcesOutput, *auditv1.AuditTrail, error) {
@@ -65,6 +66,15 @@ type actionPlan struct {
 func (rt *RuleTable) planWithAuditTrail(ctx context.Context, schemaMgr schema.Manager, input *enginev1.PlanResourcesInput, evalParams evaluator.EvalParams) (*enginev1.PlanResourcesOutput, *auditv1.AuditTrail, error) {
 	_, span := tracing.StartSpan(ctx, "engine.Plan")
 	defer span.End()
+
+	if action := input.GetAction(); action != "" { //nolint:staticcheck
+		if err := util.ValidateAction(action); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := util.ValidateActions(input.GetActions()); err != nil {
+		return nil, nil, err
+	}
 
 	p, output, err := rt.newPlanRequest(ctx, schemaMgr, input, evalParams)
 	if err != nil {

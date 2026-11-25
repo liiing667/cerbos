@@ -1,0 +1,4 @@
+type:fix
+Reject blank actions before policy evaluation
+
+Check and plan requests now reject empty or whitespace-only action identities at the public service, engine, and rule-table boundaries. This prevents a blank action from producing a synthetic deny result that can be cached or audited under an inconsistent key. Valid actions, including action names containing spaces and wildcard actions such as `*` and `view:*`, remain unchanged.
