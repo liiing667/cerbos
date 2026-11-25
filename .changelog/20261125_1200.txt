@@ -1,0 +1,3 @@
+type:fix
+Reject duplicate resources in batch check requests
+Requests containing the same resource kind and ID more than once are now rejected with an invalid argument error before policy evaluation. Previously, such requests produced multiple decisions for the same resource identity.

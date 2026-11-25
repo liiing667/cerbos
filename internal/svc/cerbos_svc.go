@@ -197,6 +197,11 @@ func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.
 		return nil, err
 	}
 
+	if err := checkDuplicateResources(req.Resources); err != nil {
+		log.Error("Invalid request", zap.Error(err))
+		return nil, err
+	}
+
 	auxData, err := cs.auxData.Extract(ctx, req.AuxData)
 	if err != nil {
 		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
@@ -259,6 +264,11 @@ func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.Chec
 	log := logging.ReqScopeLog(ctx)
 	if err := cs.checkNumResourcesLimit(len(req.Resources)); err != nil {
 		log.Error("Request too large", zap.Error(err))
+		return nil, err
+	}
+
+	if err := checkDuplicateResources(req.Resources); err != nil {
+		log.Error("Invalid request", zap.Error(err))
 		return nil, err
 	}
 
@@ -364,6 +374,38 @@ func (cs *CerbosService) checkNumActionsLimit(n int) error {
 	if n > int(cs.reqLimits.MaxActionsPerResource) {
 		return status.Errorf(codes.InvalidArgument,
 			"number of actions (%d) exceeds configured limit (%d)", n, cs.reqLimits.MaxActionsPerResource)
+	}
+
+	return nil
+}
+
+type resourceEntry interface {
+	GetResource() *enginev1.Resource
+}
+
+type resourceIdentity struct {
+	kind string
+	id   string
+}
+
+// checkDuplicateResources rejects requests that contain the same resource identity
+// more than once. Resource decisions are returned positionally, so allowing duplicates
+// would produce multiple, potentially conflicting decisions for the same resource.
+func checkDuplicateResources[T resourceEntry](resources []T) error {
+	seen := make(map[resourceIdentity]struct{}, len(resources))
+	for _, entry := range resources {
+		resource := entry.GetResource()
+		if resource == nil {
+			continue
+		}
+
+		identity := resourceIdentity{kind: resource.Kind, id: resource.Id}
+		if _, ok := seen[identity]; ok {
+			return status.Errorf(codes.InvalidArgument,
+				"duplicate resource in request: kind=%q id=%q", resource.Kind, resource.Id)
+		}
+
+		seen[identity] = struct{}{}
 	}
 
 	return nil
