@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../../../.jsonschema/ServerTestCase.schema.json
+---
+description: "Missing request ID"
+wantStatus:
+  httpStatusCode: 400
+  grpcStatusCode: 3
+wantError: true
+checkResources:
+  input:
+    principal:
+      id: john
+      policyVersion: "20210210"
+      roles:
+        - employee
+      attr:
+        department: marketing
+        geography: GB
+        team: design
+    resources:
+      - actions:
+          - view:public
+        resource:
+          kind: leave_request
+          policyVersion: "20210210"
+          id: XX125
+          attr:
+            department: marketing
+            geography: GB
+            id: XX125
+            owner: john
+            team: design

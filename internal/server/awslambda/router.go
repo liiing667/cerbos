@@ -11,6 +11,8 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/cerbos/cerbos/internal/observability/logging"
 	"github.com/cerbos/cerbos/internal/svc"
@@ -63,6 +65,10 @@ func handleCheckResources(ctx context.Context, event events.APIGatewayV2HTTPRequ
 	resp, err := svc.CheckResources(ctx, req)
 	if err != nil {
 		log.Error("CheckResources failed", zap.Error(err))
+		if status.Code(err) == codes.InvalidArgument {
+			return ErrorToAPIGateway(err.Error(), http.StatusBadRequest), nil
+		}
+
 		return ErrorToAPIGateway(err.Error(), http.StatusInternalServerError), nil
 	}
 

@@ -1,0 +1,3 @@
+type:breaking
+Require a request ID for external CheckResources calls.
+CheckResources now rejects requests without a request ID before policy evaluation, preventing decisions that cannot be correlated in audit logs. Explicit internal callers continue to use the internal check path without this external API constraint.

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -256,6 +257,15 @@ func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.
 
 // CheckResources checks a batch of heterogenous resources.
 func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.CheckResourcesRequest) (*responsev1.CheckResourcesResponse, error) {
+	if strings.TrimSpace(req.GetRequestId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "request ID is required")
+	}
+
+	return cs.checkResources(ctx, req)
+}
+
+// checkResources contains the shared policy evaluation implementation.
+func (cs *CerbosService) checkResources(ctx context.Context, req *requestv1.CheckResourcesRequest) (*responsev1.CheckResourcesResponse, error) {
 	log := logging.ReqScopeLog(ctx)
 	if err := cs.checkNumResourcesLimit(len(req.Resources)); err != nil {
 		log.Error("Request too large", zap.Error(err))

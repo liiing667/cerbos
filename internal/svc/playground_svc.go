@@ -249,7 +249,7 @@ func (cs *CerbosPlaygroundService) PlaygroundProxy(ctx context.Context, req *req
 			},
 		}, nil
 	case *requestv1.PlaygroundProxyRequest_CheckResources:
-		resp, err := cerbosSvc.CheckResources(ctx, proxyReq.CheckResources)
+		resp, err := cerbosSvc.checkResources(ctx, proxyReq.CheckResources)
 		if err != nil {
 			return nil, err
 		}
