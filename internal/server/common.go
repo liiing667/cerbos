@@ -14,6 +14,7 @@ import (
 	"github.com/cerbos/cerbos/internal/compile"
 	"github.com/cerbos/cerbos/internal/engine"
 	"github.com/cerbos/cerbos/internal/engine/policyloader"
+	"github.com/cerbos/cerbos/internal/replay"
 	"github.com/cerbos/cerbos/internal/ruletable"
 	internalSchema "github.com/cerbos/cerbos/internal/schema"
 	"github.com/cerbos/cerbos/internal/storage"
@@ -31,6 +32,7 @@ type CoreComponents struct {
 	RuleTableMgr *ruletable.Manager
 	ReqLimits    svc.RequestLimits
 	SuggestHub   bool
+	ReplayGuard  *replay.Guard
 }
 
 // InitializeCerbosCore performs the common initialization steps shared between server and Lambda function.
@@ -139,6 +141,14 @@ func InitializeCerbosCore(ctx context.Context) (*CoreComponents, error) {
 		MaxResourcesPerRequest: serverConf.RequestLimits.MaxResourcesPerRequest,
 	}
 
+	var replayGuard *replay.Guard
+	if serverConf.ReplayProtection.Enabled {
+		replayGuard = replay.New(serverConf.ReplayProtection.TTL, int(serverConf.ReplayProtection.CacheSize))
+		if ss, ok := store.(storage.Subscribable); ok {
+			ss.Subscribe(replayGuard)
+		}
+	}
+
 	return &CoreComponents{
 		Engine:       eng,
 		AuxData:      auxData,
@@ -147,5 +157,6 @@ func InitializeCerbosCore(ctx context.Context) (*CoreComponents, error) {
 		RuleTableMgr: ruletableMgr,
 		ReqLimits:    reqLimits,
 		SuggestHub:   auditLog.Backend() != audithub.Backend && store.Driver() != storagehub.DriverName,
+		ReplayGuard:  replayGuard,
 	}, nil
 }

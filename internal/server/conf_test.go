@@ -120,6 +120,50 @@ func TestConfigValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "replay protection enabled with valid values",
+			conf: map[string]any{
+				"server": map[string]any{
+					"httpListenAddr": ":6666",
+					"grpcListenAddr": ":6667",
+					"replayProtection": map[string]any{
+						"enabled":   true,
+						"ttl":       "30m",
+						"cacheSize": 1024,
+					},
+				},
+			},
+		},
+		{
+			name: "replay protection enabled with zero ttl",
+			conf: map[string]any{
+				"server": map[string]any{
+					"httpListenAddr": ":6666",
+					"grpcListenAddr": ":6667",
+					"replayProtection": map[string]any{
+						"enabled":   true,
+						"ttl":       "0s",
+						"cacheSize": 1024,
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "replay protection enabled with zero cache size",
+			conf: map[string]any{
+				"server": map[string]any{
+					"httpListenAddr": ":6666",
+					"grpcListenAddr": ":6667",
+					"replayProtection": map[string]any{
+						"enabled":   true,
+						"ttl":       "30m",
+						"cacheSize": 0,
+					},
+				},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range testCases {

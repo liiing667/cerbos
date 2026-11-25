@@ -1,0 +1,3 @@
+type:feature
+Add optional replay protection for decision requests based on request ID
+When `server.replayProtection.enabled` is set, a request ID can only be consumed once within each policy generation. Replaying a decision request (CheckResources, CheckResourceSet, CheckResourceBatch or PlanResources) with an already-consumed request ID is rejected with gRPC status ALREADY_EXISTS before the engine runs, so a replay cannot produce a new allow decision or a new decision log entry. Consumed IDs are forgotten when the policies change (a new policy generation) or after the configured TTL, and requests without a request ID remain unaffected. The feature is disabled by default.

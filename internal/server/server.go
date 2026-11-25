@@ -291,7 +291,7 @@ func (s *Server) startGRPCServer(l net.Listener, core *CoreComponents) (*grpc.Se
 	healthpb.RegisterHealthServer(server, s.health)
 	reflection.Register(server)
 
-	cerbosSvc := svc.NewCerbosService(core.Engine, core.AuxData, core.ReqLimits)
+	cerbosSvc := svc.NewCerbosService(core.Engine, core.AuxData, core.ReqLimits, core.ReplayGuard)
 	svcv1.RegisterCerbosServiceServer(server, cerbosSvc)
 	s.health.SetServingStatus(svcv1.CerbosService_ServiceDesc.ServiceName, healthpb.HealthCheckResponse_SERVING)
 

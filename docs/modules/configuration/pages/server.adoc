@@ -113,6 +113,24 @@ server:
     maxResourcesPerRequest: 50
 ----
 
+[#replay-protection]
+== Replay protection
+
+When replay protection is enabled, a request ID can only be consumed once within each policy generation. The first request carrying a given `request_id` is evaluated normally; any subsequent request that reuses the same `request_id` while the active policies are unchanged is rejected with the gRPC status `ALREADY_EXISTS` (HTTP 409) instead of producing a new decision. This means a replayed request never generates a new allow decision or a new decision log entry, so each consumed request ID maps to exactly one decision in the audit log.
+
+Consumed request IDs are tracked in memory and are forgotten when the policy set changes (a new policy generation), allowing the same `request_id` to be used again against the new policies. Entries also expire after the configured `ttl` to bound memory usage, and `cacheSize` caps how many request IDs are retained per policy generation; when the cap is reached the oldest entry is evicted. Requests without a `request_id` are never tracked. Requests that fail before producing a decision release their claim so that the client may retry safely.
+
+NOTE: Replay protection is disabled by default and only applies to the decision APIs (`CheckResources`, `CheckResourceSet`, `CheckResourceBatch` and `PlanResources`). Because the consumed IDs are held in memory, each Cerbos instance enforces this independently and the state is lost on restart.
+
+[source,yaml,linenums]
+----
+server:
+  replayProtection:
+    enabled: true
+    ttl: 1h
+    cacheSize: 4096
+----
+
 
 [#admin-api]
 == Enable Admin API

@@ -50,7 +50,7 @@ func NewFunctionHandler(ctx context.Context) (*FunctionHandler, error) {
 		return nil, err
 	}
 
-	cerbosSvc := svc.NewCerbosService(core.Engine, core.AuxData, core.ReqLimits)
+	cerbosSvc := svc.NewCerbosService(core.Engine, core.AuxData, core.ReqLimits, core.ReplayGuard)
 
 	log.Info("Lambda function handler initialized successfully")
 	return &FunctionHandler{

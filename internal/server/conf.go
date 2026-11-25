@@ -18,24 +18,26 @@ import (
 )
 
 const (
-	confKey                         = "server"
-	defaultAdminPassword            = "cerbosAdmin"
-	defaultAdminUsername            = "cerbos"
-	defaultGRPCConnectionTimeout    = 60 * time.Second
-	defaultGRPCListenAddr           = ":3593"
-	defaultGRPCMaxConcurrentStreams = 1024
-	defaultGRPCMaxConnectionAge     = 10 * time.Minute
-	defaultGRPCMaxRecvMsgSizeBytes  = 4 * 1024 * 1024 // 4MiB
-	defaultHTTPIdleTimeout          = 120 * time.Second
-	defaultHTTPListenAddr           = ":3592"
-	defaultHTTPReadHeaderTimeout    = 15 * time.Second
-	defaultHTTPReadTimeout          = 30 * time.Second
-	defaultHTTPWriteTimeout         = 30 * time.Second
-	defaultMaxActionsPerResource    = 50
-	defaultMaxResourcesPerRequest   = 50
-	defaultRawAdminPasswordHash     = "$2y$10$VlPwcwpgcGZ5KjTaN1Pzk.vpFiQVG6F2cSWzQa9RtrNo3IacbzsEi" //nolint:gosec
-	defaultUDSFileMode              = "0o766"
-	requestItemsMax                 = 500
+	confKey                          = "server"
+	defaultAdminPassword             = "cerbosAdmin"
+	defaultAdminUsername             = "cerbos"
+	defaultGRPCConnectionTimeout     = 60 * time.Second
+	defaultGRPCListenAddr            = ":3593"
+	defaultGRPCMaxConcurrentStreams  = 1024
+	defaultGRPCMaxConnectionAge      = 10 * time.Minute
+	defaultGRPCMaxRecvMsgSizeBytes   = 4 * 1024 * 1024 // 4MiB
+	defaultHTTPIdleTimeout           = 120 * time.Second
+	defaultHTTPListenAddr            = ":3592"
+	defaultHTTPReadHeaderTimeout     = 15 * time.Second
+	defaultHTTPReadTimeout           = 30 * time.Second
+	defaultHTTPWriteTimeout          = 30 * time.Second
+	defaultMaxActionsPerResource     = 50
+	defaultMaxResourcesPerRequest    = 50
+	defaultRawAdminPasswordHash      = "$2y$10$VlPwcwpgcGZ5KjTaN1Pzk.vpFiQVG6F2cSWzQa9RtrNo3IacbzsEi" //nolint:gosec
+	defaultReplayProtectionCacheSize = 4096
+	defaultReplayProtectionTTL       = time.Hour
+	defaultUDSFileMode               = "0o766"
+	requestItemsMax                  = 500
 )
 
 var (
@@ -59,6 +61,8 @@ type Conf struct {
 	CORS CORSConf `yaml:"cors"`
 	// RequestLimits defines the limits for requests.
 	RequestLimits RequestLimitsConf `yaml:"requestLimits"`
+	// ReplayProtection defines the replay protection settings for decision requests.
+	ReplayProtection ReplayProtectionConf `yaml:"replayProtection"`
 	// MetricsEnabled defines whether the metrics endpoint is enabled.
 	MetricsEnabled bool `yaml:"metricsEnabled" conf:",example=true"`
 	// LogRequestPayloads defines whether the request payloads should be logged.
@@ -143,6 +147,18 @@ type RequestLimitsConf struct {
 	MaxResourcesPerRequest uint `yaml:"maxResourcesPerRequest" conf:",example=50"`
 }
 
+type ReplayProtectionConf struct {
+	// Enabled defines whether a request ID may only be consumed once within each policy generation.
+	// When enabled, replaying a decision request with an already-consumed request ID is rejected with
+	// gRPC status ALREADY_EXISTS instead of producing a new decision. Request IDs become reusable again
+	// after the policies change (a new policy generation) or after the entry expires.
+	Enabled bool `yaml:"enabled" conf:",example=false"`
+	// TTL defines how long a consumed request ID is remembered within a policy generation.
+	TTL time.Duration `yaml:"ttl" conf:",example=1h"`
+	// CacheSize bounds the number of request IDs remembered per policy generation.
+	CacheSize uint `yaml:"cacheSize" conf:",example=4096"`
+}
+
 type AdvancedConf struct {
 	// HTTP server settings.
 	HTTP AdvancedHTTPConf `yaml:"http"`
@@ -185,6 +201,10 @@ func (c *Conf) SetDefaults() {
 	c.RequestLimits = RequestLimitsConf{
 		MaxActionsPerResource:  defaultMaxActionsPerResource,
 		MaxResourcesPerRequest: defaultMaxResourcesPerRequest,
+	}
+	c.ReplayProtection = ReplayProtectionConf{
+		TTL:       defaultReplayProtectionTTL,
+		CacheSize: defaultReplayProtectionCacheSize,
 	}
 
 	if c.AdminAPI.AdminCredentials == nil {
@@ -231,6 +251,16 @@ func (c *Conf) Validate() (errs error) {
 
 	if c.RequestLimits.MaxResourcesPerRequest < 1 || c.RequestLimits.MaxResourcesPerRequest > requestItemsMax {
 		errs = multierr.Append(errs, fmt.Errorf("maxResourcesPerRequest must be between 1 and %d", requestItemsMax))
+	}
+
+	if c.ReplayProtection.Enabled {
+		if c.ReplayProtection.TTL <= 0 {
+			errs = multierr.Append(errs, errors.New("replayProtection.ttl must be greater than 0 when replay protection is enabled"))
+		}
+
+		if c.ReplayProtection.CacheSize < 1 {
+			errs = multierr.Append(errs, errors.New("replayProtection.cacheSize must be greater than 0 when replay protection is enabled"))
+		}
 	}
 
 	return errs

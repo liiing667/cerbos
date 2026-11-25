@@ -130,6 +130,10 @@ server:
   requestLimits: # RequestLimits defines the limits for requests.
     maxActionsPerResource: 50 # MaxActionsPerResource sets the maximum number of actions that could be checked for a resource in a single request.
     maxResourcesPerRequest: 50 # MaxResourcesPerBatch sets the maximum number of resources that could be sent in a single request.
+  replayProtection: # ReplayProtection defines the replay protection settings for decision requests.
+    enabled: false # Enabled defines whether a request ID may only be consumed once within each policy generation.
+    ttl: 1h # TTL defines how long a consumed request ID is remembered within a policy generation.
+    cacheSize: 4096 # CacheSize bounds the number of request IDs remembered per policy generation.
   tls: # TLS defines the TLS configuration for the server.
     caCert: /path/to/CA_certificate # CACert is the path to the optional CA certificate for verifying client requests.
     cert: /path/to/certificate # Cert is the path to the TLS certificate file.

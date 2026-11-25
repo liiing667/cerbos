@@ -210,7 +210,7 @@ func (cs *CerbosPlaygroundService) PlaygroundProxy(ctx context.Context, req *req
 		return nil, status.Error(codes.Internal, "failed to create engine")
 	}
 
-	cerbosSvc := NewCerbosService(eng, cs.auxData, cs.reqLimits)
+	cerbosSvc := NewCerbosService(eng, cs.auxData, cs.reqLimits, nil)
 	switch proxyReq := req.ProxyRequest.(type) {
 	case *requestv1.PlaygroundProxyRequest_CheckResourceSet:
 		resp, err := cerbosSvc.CheckResourceSet(ctx, proxyReq.CheckResourceSet)

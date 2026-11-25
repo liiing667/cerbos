@@ -23,6 +23,7 @@ import (
 	"github.com/cerbos/cerbos/internal/engine"
 	"github.com/cerbos/cerbos/internal/observability/logging"
 	"github.com/cerbos/cerbos/internal/observability/tracing"
+	"github.com/cerbos/cerbos/internal/replay"
 	"github.com/cerbos/cerbos/internal/util"
 )
 
@@ -32,6 +33,7 @@ var _ svcv1.CerbosServiceServer = (*CerbosService)(nil)
 type CerbosService struct {
 	eng     *engine.Engine
 	auxData *auxdata.AuxData
+	replay  *replay.Guard
 	*svcv1.UnimplementedCerbosServiceServer
 	reqLimits RequestLimits
 }
@@ -41,20 +43,49 @@ type RequestLimits struct {
 	MaxResourcesPerRequest uint
 }
 
-func NewCerbosService(eng *engine.Engine, auxData *auxdata.AuxData, reqLimits RequestLimits) *CerbosService {
+func NewCerbosService(eng *engine.Engine, auxData *auxdata.AuxData, reqLimits RequestLimits, replayGuard *replay.Guard) *CerbosService {
 	return &CerbosService{
 		eng:                              eng,
 		auxData:                          auxData,
+		replay:                           replayGuard,
 		reqLimits:                        reqLimits,
 		UnimplementedCerbosServiceServer: &svcv1.UnimplementedCerbosServiceServer{},
 	}
 }
 
+// consumeRequestID claims the request ID for the current policy generation.
+// When replay protection is enabled and the ID was already consumed, it returns
+// an ALREADY_EXISTS error without invoking the engine, so a replay cannot
+// produce a new decision or a new decision log entry. A nil guard means replay
+// protection is disabled. On success, the returned release function must be
+// called if the request subsequently fails before producing a decision,
+// allowing the client to retry with the same ID.
+func (cs *CerbosService) consumeRequestID(log *zap.Logger, requestID string) (release func(), err error) {
+	if cs.replay == nil || requestID == "" {
+		return func() {}, nil
+	}
+
+	if !cs.replay.Consume(requestID) {
+		log.Warn("Rejected replayed request with an already consumed request ID", zap.String("request_id", requestID))
+		return nil, status.Errorf(codes.AlreadyExists,
+			"request ID %q has already been consumed in the current policy generation; replays do not produce a new decision",
+			requestID)
+	}
+
+	return func() { cs.replay.Release(requestID) }, nil
+}
+
 func (cs *CerbosService) PlanResources(ctx context.Context, request *requestv1.PlanResourcesRequest) (*responsev1.PlanResourcesResponse, error) {
 	log := logging.ReqScopeLog(ctx)
 
+	release, err := cs.consumeRequestID(log, request.RequestId)
+	if err != nil {
+		return nil, err
+	}
+
 	auxData, err := cs.auxData.Extract(ctx, request.AuxData)
 	if err != nil {
+		release()
 		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
 			log.Error(fmt.Sprintf("Failed to extract auxData: %s", extractErr.Description), zap.Error(extractErr.Cause))
 		} else {
@@ -80,6 +111,7 @@ func (cs *CerbosService) PlanResources(ctx context.Context, request *requestv1.P
 	}
 	output, err := cs.eng.Plan(logging.ToContext(ctx, log), input)
 	if err != nil {
+		release()
 		log.Error("Resources query plan request failed", zap.Error(err))
 		switch {
 		case errors.Is(err, compile.PolicyCompilationErr{}):
@@ -127,18 +159,27 @@ func (cs *CerbosService) PlanResources(ctx context.Context, request *requestv1.P
 // Deprecated: Since 0.16.0. Use CheckResources instead.
 func (cs *CerbosService) CheckResourceSet(ctx context.Context, req *requestv1.CheckResourceSetRequest) (*responsev1.CheckResourceSetResponse, error) {
 	log := logging.ReqScopeLog(ctx)
+
+	release, err := cs.consumeRequestID(log, req.RequestId)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := cs.checkNumResourcesLimit(len(req.Resource.Instances)); err != nil {
+		release()
 		log.Error("Request too large", zap.Error(err))
 		return nil, err
 	}
 
 	if err := cs.checkNumActionsLimit(len(req.Actions)); err != nil {
+		release()
 		log.Error("Request too large", zap.Error(err))
 		return nil, err
 	}
 
 	auxData, err := cs.auxData.Extract(ctx, req.AuxData)
 	if err != nil {
+		release()
 		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
 			log.Error(fmt.Sprintf("Failed to extract auxData: %s", extractErr.Description), zap.Error(extractErr.Cause))
 		} else {
@@ -172,6 +213,7 @@ func (cs *CerbosService) CheckResourceSet(ctx context.Context, req *requestv1.Ch
 
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
+		release()
 		log.Error("Policy check failed", zap.Error(err))
 		if errors.Is(err, compile.PolicyCompilationErr{}) {
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
@@ -192,13 +234,21 @@ func (cs *CerbosService) CheckResourceSet(ctx context.Context, req *requestv1.Ch
 // Deprecated: Since 0.16.0. Use CheckResources instead.
 func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.CheckResourceBatchRequest) (*responsev1.CheckResourceBatchResponse, error) {
 	log := logging.ReqScopeLog(ctx)
+
+	release, err := cs.consumeRequestID(log, req.RequestId)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := cs.checkNumResourcesLimit(len(req.Resources)); err != nil {
+		release()
 		log.Error("Request too large", zap.Error(err))
 		return nil, err
 	}
 
 	auxData, err := cs.auxData.Extract(ctx, req.AuxData)
 	if err != nil {
+		release()
 		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
 			log.Error(fmt.Sprintf("Failed to extract auxData: %s", extractErr.Description), zap.Error(extractErr.Cause))
 		} else {
@@ -211,6 +261,7 @@ func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.
 	inputs := make([]*enginev1.CheckInput, len(req.Resources))
 	for i, res := range req.Resources {
 		if err := cs.checkNumActionsLimit(len(res.Actions)); err != nil {
+			release()
 			log.Error("Request too large", zap.Error(err))
 			return nil, err
 		}
@@ -226,6 +277,7 @@ func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.
 
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
+		release()
 		log.Error("Policy check failed", zap.Error(err))
 		if errors.Is(err, compile.PolicyCompilationErr{}) {
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
@@ -257,13 +309,21 @@ func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.
 // CheckResources checks a batch of heterogenous resources.
 func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.CheckResourcesRequest) (*responsev1.CheckResourcesResponse, error) {
 	log := logging.ReqScopeLog(ctx)
+
+	release, err := cs.consumeRequestID(log, req.RequestId)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := cs.checkNumResourcesLimit(len(req.Resources)); err != nil {
+		release()
 		log.Error("Request too large", zap.Error(err))
 		return nil, err
 	}
 
 	auxData, err := cs.auxData.Extract(ctx, req.AuxData)
 	if err != nil {
+		release()
 		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
 			log.Error(fmt.Sprintf("Failed to extract auxData: %s", extractErr.Description), zap.Error(extractErr.Cause))
 		} else {
@@ -276,6 +336,7 @@ func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.Chec
 	inputs := make([]*enginev1.CheckInput, len(req.Resources))
 	for i, res := range req.Resources {
 		if err := cs.checkNumActionsLimit(len(res.Actions)); err != nil {
+			release()
 			log.Error("Request too large", zap.Error(err))
 			return nil, err
 		}
@@ -291,6 +352,7 @@ func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.Chec
 
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
+		release()
 		log.Error("Policy check failed", zap.Error(err))
 		switch {
 		case errors.Is(err, compile.PolicyCompilationErr{}):
