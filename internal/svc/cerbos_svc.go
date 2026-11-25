@@ -82,6 +82,8 @@ func (cs *CerbosService) PlanResources(ctx context.Context, request *requestv1.P
 	if err != nil {
 		log.Error("Resources query plan request failed", zap.Error(err))
 		switch {
+		case errors.Is(err, util.ErrInvalidPrincipalID):
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
 		case errors.Is(err, compile.PolicyCompilationErr{}):
 			return nil, status.Errorf(codes.FailedPrecondition, "Plan failed due to invalid policy")
 		case errors.Is(err, context.Canceled):
@@ -173,6 +175,9 @@ func (cs *CerbosService) CheckResourceSet(ctx context.Context, req *requestv1.Ch
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
+		if errors.Is(err, util.ErrInvalidPrincipalID) {
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+		}
 		if errors.Is(err, compile.PolicyCompilationErr{}) {
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
 		}
@@ -227,6 +232,9 @@ func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
+		if errors.Is(err, util.ErrInvalidPrincipalID) {
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+		}
 		if errors.Is(err, compile.PolicyCompilationErr{}) {
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
 		}
@@ -293,6 +301,8 @@ func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.Chec
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
 		switch {
+		case errors.Is(err, util.ErrInvalidPrincipalID):
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
 		case errors.Is(err, compile.PolicyCompilationErr{}):
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
 		case errors.Is(err, context.Canceled):

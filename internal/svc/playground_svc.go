@@ -31,6 +31,7 @@ import (
 	"github.com/cerbos/cerbos/internal/storage"
 	"github.com/cerbos/cerbos/internal/storage/disk"
 	"github.com/cerbos/cerbos/internal/storage/index"
+	"github.com/cerbos/cerbos/internal/util"
 	"github.com/cerbos/cerbos/internal/verify"
 )
 
@@ -178,6 +179,9 @@ func (cs *CerbosPlaygroundService) PlaygroundEvaluate(ctx context.Context, req *
 	output, err := eng.Check(procCtx, inputs)
 	if err != nil {
 		log.Error("Engine check failed", zap.Error(err))
+		if errors.Is(err, util.ErrInvalidPrincipalID) {
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+		}
 		return nil, status.Errorf(codes.Internal, "policy check failed")
 	}
 

@@ -26,6 +26,7 @@ import (
 	"github.com/cerbos/cerbos/internal/observability/tracing"
 	"github.com/cerbos/cerbos/internal/ruletable"
 	"github.com/cerbos/cerbos/internal/schema"
+	"github.com/cerbos/cerbos/internal/util"
 )
 
 var _ evaluator.Evaluator = (*Engine)(nil)
@@ -149,6 +150,9 @@ func (engine *Engine) Plan(ctx context.Context, input *enginev1.PlanResourcesInp
 		defer span.End()
 
 		checkOpts := evaluator.NewCheckOptions(ctx, engine.conf, opts...)
+		if err := util.ValidatePrincipalID(input.GetPrincipal().GetId()); err != nil {
+			return nil, nil, err
+		}
 
 		output, trail, err = engine.doPlan(ctx, input, checkOpts)
 		if err != nil {
@@ -219,6 +223,9 @@ func (engine *Engine) Check(ctx context.Context, inputs []*enginev1.CheckInput, 
 		defer span.End()
 
 		checkOpts := evaluator.NewCheckOptions(ctx, engine.conf, opts...)
+		if err := validateCheckInputs(inputs); err != nil {
+			return nil, nil, err
+		}
 
 		// if the number of inputs is less than the threshold, do a serial execution as it is usually faster.
 		// ditto if the worker pool is not initialized
@@ -237,6 +244,16 @@ func (engine *Engine) Check(ctx context.Context, inputs []*enginev1.CheckInput, 
 	metrics.EngineCheckBatchSize().Record(context.Background(), int64(len(inputs)))
 
 	return engine.logCheckDecision(ctx, inputs, outputs, err, trail)
+}
+
+func validateCheckInputs(inputs []*enginev1.CheckInput) error {
+	for _, input := range inputs {
+		if err := util.ValidatePrincipalID(input.GetPrincipal().GetId()); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (engine *Engine) logCheckDecision(ctx context.Context, inputs []*enginev1.CheckInput, outputs []*enginev1.CheckOutput, checkErr error, trail *auditv1.AuditTrail) ([]*enginev1.CheckOutput, error) {

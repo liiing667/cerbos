@@ -74,6 +74,9 @@ func (aas *AuthzenAuthorizationService) AccessEvaluation(ctx context.Context, r 
 	outputs, err := aas.eng.Check(logging.ToContext(ctx, log), []*enginev1.CheckInput{input})
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
+		if errors.Is(err, util.ErrInvalidPrincipalID) {
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+		}
 		if errors.Is(err, compile.PolicyCompilationErr{}) {
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
 		}
@@ -250,6 +253,9 @@ func (aas *AuthzenAuthorizationService) AccessEvaluationBatch(ctx context.Contex
 		outputs, err := aas.eng.Check(logging.ToContext(ctx, log), inputs)
 		if err != nil {
 			log.Error("Policy check failed", zap.Error(err))
+			if errors.Is(err, util.ErrInvalidPrincipalID) {
+				return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+			}
 			if errors.Is(err, compile.PolicyCompilationErr{}) {
 				return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
 			}
