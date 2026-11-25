@@ -111,8 +111,8 @@ func (idx *bitmapIndex) addBinding(b *BindingHandle, evalKey EvaluationKeyTuple)
 	if b.Version != EmptyHandle {
 		idx.version.Add(b.Version.Value(), id)
 	}
-	if b.Role != EmptyHandle {
-		idx.role.Set(b.Role.Value(), id)
+	if role := HandleStr(b.Role); !isBlankRole(role) {
+		idx.role.Set(role, id)
 	}
 	if b.Resource != EmptyHandle {
 		idx.resource.Set(b.Resource.Value(), id)

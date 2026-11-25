@@ -167,7 +167,7 @@ func (m *Index) IndexRule(rule *runtimev1.RuleTable_RuleRow) error {
 		Scope:             mkStringHandle(rule.Scope),
 		Version:           mkStringHandle(rule.Version),
 		Resource:          mkStringHandle(rule.Resource),
-		Role:              mkStringHandle(rule.Role),
+		Role:              mkStringHandle(normalizeIndexRole(rule.Role)),
 		Principal:         mkStringHandle(rule.Principal),
 		OriginFqn:         mkStringHandle(rule.OriginFqn),
 		OriginDerivedRole: mkStringHandle(rule.OriginDerivedRole),
@@ -249,6 +249,10 @@ func (m *Index) Query(version string, resource ResourceKind, scope, action strin
 		resourceBM = bm
 	}
 	if len(roles) > 0 {
+		roles = NormalizeRoles(roles)
+		if len(roles) == 0 {
+			return buf
+		}
 		roleBM = bi.role.QueryMultiple(arena, roles)
 		if roleBM.IsEmpty() {
 			return buf
@@ -617,6 +621,10 @@ func (m *Index) QueryMulti(versions, resources, scopes, roles, actions []string,
 
 	var resourceBM, roleBM *Bitmap
 	if len(roles) > 0 {
+		roles = NormalizeRoles(roles)
+		if len(roles) == 0 {
+			return nil
+		}
 		roleBM = bi.role.QueryMultiple(arena, roles)
 		if roleBM.IsEmpty() {
 			return nil
@@ -713,6 +721,7 @@ func (m *Index) applyActionFilter(arena *bitmapArena, baseBM *Bitmap, actions []
 // AddParentRoles returns the given roles plus their parent roles, as declared by the role policies of
 // the given version and scope.
 func (m *Index) AddParentRoles(version, scope string, roles []string) []string {
+	roles = NormalizeRoles(roles)
 	roleParents := m.parentRoles[version][scope]
 	if len(roleParents) == 0 {
 		return roles
@@ -721,9 +730,9 @@ func (m *Index) AddParentRoles(version, scope string, roles []string) []string {
 	result := make([]string, 0, len(roles)*2) //nolint:mnd
 	result = append(result, roles...)
 	for _, role := range roles {
-		result = append(result, roleParents[role]...)
+		result = append(result, NormalizeRoles(roleParents[role])...)
 	}
-	return result
+	return NormalizeRoles(result)
 }
 
 // IndexParentRoles replaces the parent role index with the transitive parent roles of each role.
@@ -751,6 +760,9 @@ func compileParentRoleAncestors(scopeParentRoles map[string]*runtimev1.RuleTable
 
 		compiled[scope] = make(map[string][]string, len(parentRoles.RoleParentRoles))
 		for role := range parentRoles.RoleParentRoles {
+			if isBlankRole(role) {
+				continue
+			}
 			visited := make(map[string]struct{})
 			roleParentsSet := make(map[string]struct{})
 			collectParentRoles(scopeParentRoles, scope, role, roleParentsSet, visited)
@@ -776,6 +788,9 @@ func collectParentRoles(scopeParentRoles map[string]*runtimev1.RuleTable_RolePar
 	if parentRoles, ok := scopeParentRoles[scope]; ok {
 		if prs, ok := parentRoles.RoleParentRoles[role]; ok {
 			for _, pr := range prs.Roles {
+				if isBlankRole(pr) {
+					continue
+				}
 				parentRoleSet[pr] = struct{}{}
 				collectParentRoles(scopeParentRoles, scope, pr, parentRoleSet, visited)
 			}

@@ -474,6 +474,11 @@ func addRolePolicy(rt *runtimev1.RuleTable, p *runtimev1.RunnableRolePolicySet) 
 // VersionScopeParentRoles. When several versions of the role policy exist, it holds the parent roles of
 // the version that sorts first, so that the result doesn't depend on the order the policies are added in.
 func setRoleParentRoles(rt *runtimev1.RuleTable, version, scope, role string, parentRoles []string) {
+	if strings.TrimSpace(role) == "" {
+		return
+	}
+
+	parentRoles = index.NormalizeRoles(parentRoles)
 	pr := &runtimev1.RuleTable_RoleParentRoles_ParentRoles{Roles: parentRoles}
 
 	setVersionRoleParentRoles(rt, version, scope, role, pr)

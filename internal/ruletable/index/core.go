@@ -161,7 +161,7 @@ func makeEvaluationKeyTuple(pb *runtimev1.EvaluationKeyTuple, fallbackKey string
 		Prefix:      mkStringHandle(pb.Prefix),
 		Resource:    mkStringHandle(pb.Resource),
 		Principal:   mkStringHandle(pb.Principal),
-		Role:        mkStringHandle(pb.Role),
+		Role:        mkStringHandle(normalizeIndexRole(pb.Role)),
 		DerivedRole: mkStringHandle(pb.DerivedRole),
 		Version:     mkStringHandle(pb.Version),
 		Scope:       mkStringHandle(pb.Scope),

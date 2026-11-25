@@ -168,7 +168,8 @@ func (rt *RuleTable) newPlanRequest(ctx context.Context, schemaMgr schema.Manage
 		}
 	}
 
-	allRoles := rt.idx.AddParentRoles(resourceVersion, p.parentRolesScope, input.Principal.Roles)
+	principalRoles := index.NormalizeRoles(input.Principal.Roles)
+	allRoles := rt.idx.AddParentRoles(resourceVersion, p.parentRolesScope, principalRoles)
 	p.resourceKind = index.NewResourceKind(input.Resource.Kind)
 
 	p.includingParentRoles = make(map[string]struct{}, len(allRoles))
@@ -185,6 +186,7 @@ func (rt *RuleTable) planAction(ctx context.Context, p *planRequest, action stri
 	var policyMatch bool
 	nf := new(planner.NodeFilter)
 	scopedDerivedRolesList := make(map[string]func() (*exprpb.Expr, error))
+	principalRoles := index.NormalizeRoles(p.input.Principal.Roles)
 
 	var hasPolicyTypeAllow bool
 	var rootNode *planner.QpN
@@ -202,7 +204,7 @@ policyTypesLoop:
 			scopes = p.resourceScopes
 		}
 
-		for i, role := range p.input.Principal.Roles {
+		for i, role := range principalRoles {
 			// Principal rules are role agnostic (they treat the rows as having a `*` role). Therefore we can
 			// break out of the loop after the first iteration as it covers all potential principal rows.
 			if i > 0 && pt == policyv1.Kind_KIND_PRINCIPAL {

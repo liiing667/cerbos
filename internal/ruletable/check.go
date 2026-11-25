@@ -180,7 +180,8 @@ func (rt *RuleTable) check(ctx context.Context, tctx tracer.Context, schemaMgr s
 		parentRolesScope = resourceScopes[0]
 	}
 
-	allRoles := rt.idx.AddParentRoles(resourceVersion, parentRolesScope, input.Principal.Roles)
+	principalRoles := index.NormalizeRoles(input.Principal.Roles)
+	allRoles := rt.idx.AddParentRoles(resourceVersion, parentRolesScope, principalRoles)
 
 	includingParentRoles := make(map[string]struct{}, len(allRoles))
 	for _, r := range allRoles {
@@ -216,7 +217,7 @@ func (rt *RuleTable) check(ctx context.Context, tctx tracer.Context, schemaMgr s
 			// This ensures we use the right policy name if no rules match
 			actionEffectInfo.Effect = effectv1.Effect_EFFECT_NO_MATCH
 
-			for i, role := range input.Principal.Roles {
+			for i, role := range principalRoles {
 				// Principal rules are role agnostic (they treat the rows as having a `*` role). Therefore we can
 				// break out of the loop after the first iteration as it covers all potential principal rows.
 				if i > 0 && pt == policyv1.Kind_KIND_PRINCIPAL {

@@ -1,0 +1,3 @@
+type:fix
+Deduplicate role identities during rule-table evaluation
+Blank and duplicate principal/parent role identities no longer create repeated index queries or synthetic role-policy denies during policy refreshes and concurrent checks. Decision attribution now retains the role attached to the binding that supplies an allow effect, while distinct roles continue to be evaluated independently.
