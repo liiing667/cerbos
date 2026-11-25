@@ -4,6 +4,7 @@
 package ruletable
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -156,6 +157,24 @@ func comparePlanWithCheck(t *testing.T, rt *RuleTable, schemaMgr schema.Manager,
 	opts := []evaluator.CheckOpt{evaluator.WithNowFunc(nowFn)}
 
 	outputs, _, err := rt.Check(ctx, conf, schemaMgr, []*enginev1.CheckInput{input}, opts...)
+	if errors.Is(err, ErrPolicyVersionMismatch{}) {
+		// Mixing principal and resource policies from different policy versions is
+		// rejected by design; Plan must fail in the same way.
+		_, _, planErr := rt.newPlanRequest(ctx, schemaMgr, &enginev1.PlanResourcesInput{
+			RequestId: input.RequestId,
+			Principal: input.Principal,
+			Resource: &enginev1.PlanResourcesInput_Resource{
+				Kind:          input.Resource.Kind,
+				PolicyVersion: input.Resource.PolicyVersion,
+				Scope:         input.Resource.Scope,
+			},
+			Actions: input.Actions,
+			AuxData: input.AuxData,
+		}, evaluator.NewCheckOptions(ctx, conf, opts...).EvalParams)
+		require.ErrorIs(t, planErr, ErrPolicyVersionMismatch{})
+
+		return nil
+	}
 	require.NoError(t, err)
 	require.Len(t, outputs, 1)
 

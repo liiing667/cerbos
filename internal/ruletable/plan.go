@@ -123,6 +123,11 @@ func (rt *RuleTable) newPlanRequest(ctx context.Context, schemaMgr schema.Manage
 	principalScopes, principalPolicyFQN := principalLookup.Scopes, principalLookup.PolicyFQN
 	resourceScopes, resourcePolicyFQN := resourceLookup.Scopes, resourceLookup.PolicyFQN
 
+	if err := validatePolicyVersionIsolation(principalVersion, resourceVersion,
+		principalLookup.ExistingPolicyFQN != "", resourceLookup.ExistingPolicyFQN != ""); err != nil {
+		return nil, nil, err
+	}
+
 	p := &planRequest{
 		input:            input,
 		evalParams:       evalParams,

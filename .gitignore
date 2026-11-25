@@ -18,6 +18,7 @@ npm/test/cases/*/yarn.lock
 npm/test/registry/node_modules/
 npm/test/registry/storage/
 **/node_modules/
+.gocache/
 
 # Local Netlify folder
 .netlify

@@ -120,6 +120,11 @@ func (rt *RuleTable) check(ctx context.Context, tctx tracer.Context, schemaMgr s
 	principalPolicyKey := namer.PolicyKeyFromFQN(principalPolicyFQN)
 	resourcePolicyKey := namer.PolicyKeyFromFQN(resourcePolicyFQN)
 
+	if err := validatePolicyVersionIsolation(principalVersion, resourceVersion,
+		principalLookup.ExistingPolicyFQN != "", resourceLookup.ExistingPolicyFQN != ""); err != nil {
+		return nil, err
+	}
+
 	if len(principalScopes) == 0 && len(resourceScopes) == 0 {
 		return result, nil
 	}

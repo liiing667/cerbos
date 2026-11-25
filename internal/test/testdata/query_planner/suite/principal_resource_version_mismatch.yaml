@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=../../.jsonschema/QueryPlannerTestSuite.schema.json
 ---
-description: Principal policy is resolved using the principal's policy version when it differs from the resource's policy version
+description: Requests that would combine principal and resource policies from different policy versions are rejected
 
 config:
   lenientScopeSearch:
@@ -27,6 +27,10 @@ tests:
       kind: additive
       policyVersion: "2025_11"
     action: POST
+    # The principal policy is version "default" while the resource policy is
+    # version "2025_11". Both policies exist, so the request must fail with a
+    # policy version mismatch instead of producing a plan. The legacy outputs
+    # below are retained only to document the pre-fix behaviour.
     want:
       filter:
         kind: KIND_ALWAYS_ALLOWED
@@ -37,6 +41,7 @@ tests:
       kind: additive
       policyVersion: "2025_11"
     action: GET
+    # See the note above: this mixed-version request is rejected as well.
     want:
       filter:
         kind: KIND_ALWAYS_DENIED

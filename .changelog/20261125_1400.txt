@@ -1,0 +1,3 @@
+type:fix
+Reject requests that mix principal and resource policies from different policy versions
+A check or plan request whose principal and resource resolve to policies in different policy versions no longer combines them into a single evaluation. Such a request now fails with an invalid argument error instead of silently producing a decision (for example an ALLOW) assembled across policy generations. Requests that resolve to a single version, or where only one of the two policy kinds exists, keep their previous behaviour.

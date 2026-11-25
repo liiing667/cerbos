@@ -23,6 +23,7 @@ import (
 	"github.com/cerbos/cerbos/internal/engine"
 	"github.com/cerbos/cerbos/internal/observability/logging"
 	"github.com/cerbos/cerbos/internal/observability/tracing"
+	"github.com/cerbos/cerbos/internal/ruletable"
 	"github.com/cerbos/cerbos/internal/util"
 )
 
@@ -81,6 +82,9 @@ func (cs *CerbosService) PlanResources(ctx context.Context, request *requestv1.P
 	output, err := cs.eng.Plan(logging.ToContext(ctx, log), input)
 	if err != nil {
 		log.Error("Resources query plan request failed", zap.Error(err))
+		if mappedErr := mapEngineError(err); mappedErr != nil {
+			return nil, mappedErr
+		}
 		switch {
 		case errors.Is(err, compile.PolicyCompilationErr{}):
 			return nil, status.Errorf(codes.FailedPrecondition, "Plan failed due to invalid policy")
@@ -173,6 +177,9 @@ func (cs *CerbosService) CheckResourceSet(ctx context.Context, req *requestv1.Ch
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
+		if mappedErr := mapEngineError(err); mappedErr != nil {
+			return nil, mappedErr
+		}
 		if errors.Is(err, compile.PolicyCompilationErr{}) {
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
 		}
@@ -227,6 +234,9 @@ func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
+		if mappedErr := mapEngineError(err); mappedErr != nil {
+			return nil, mappedErr
+		}
 		if errors.Is(err, compile.PolicyCompilationErr{}) {
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
 		}
@@ -292,6 +302,9 @@ func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.Chec
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
+		if mappedErr := mapEngineError(err); mappedErr != nil {
+			return nil, mappedErr
+		}
 		switch {
 		case errors.Is(err, compile.PolicyCompilationErr{}):
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
@@ -364,6 +377,17 @@ func (cs *CerbosService) checkNumActionsLimit(n int) error {
 	if n > int(cs.reqLimits.MaxActionsPerResource) {
 		return status.Errorf(codes.InvalidArgument,
 			"number of actions (%d) exceeds configured limit (%d)", n, cs.reqLimits.MaxActionsPerResource)
+	}
+
+	return nil
+}
+
+// mapEngineError translates engine errors into gRPC status errors. A request
+// that combines principal and resource policies from different policy versions
+// is a client error and therefore maps to InvalidArgument.
+func mapEngineError(err error) error {
+	if errors.Is(err, ruletable.ErrPolicyVersionMismatch{}) {
+		return status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	return nil

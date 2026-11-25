@@ -6,6 +6,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -57,6 +58,10 @@ func TestCheck(t *testing.T) {
 
 				t.Run("engine", func(t *testing.T) {
 					testCheck(t, tc, mkEngine(t, params), wantSuccess)
+
+					if expectPolicyVersionMismatch(tc) {
+						return
+					}
 
 					diff := cmp.Diff(tc.WantDecisionLogs, mockAuditLog.getDecisionLogs(),
 						protocmp.Transform(),
@@ -160,6 +165,33 @@ func testEngineConfigMatrix(t *testing.T, config *privatev1.EngineConfig, test f
 	}
 }
 
+// expectPolicyVersionMismatch reports whether the case is the version
+// isolation case: every input names a principal and resource policy version
+// that differ, with both policies present in the store. Such a request must
+// fail with ErrPolicyVersionMismatch rather than writing a decision log.
+func expectPolicyVersionMismatch(tc *privatev1.EngineTestCase) bool {
+	conf := &evaluator.Conf{}
+	conf.SetDefaults()
+
+	for _, input := range tc.GetInputs() {
+		principalVersion := input.GetPrincipal().GetPolicyVersion()
+		if principalVersion == "" {
+			principalVersion = conf.DefaultPolicyVersion
+		}
+
+		resourceVersion := input.GetResource().GetPolicyVersion()
+		if resourceVersion == "" {
+			resourceVersion = conf.DefaultPolicyVersion
+		}
+
+		if principalVersion == resourceVersion {
+			return false
+		}
+	}
+
+	return len(tc.GetInputs()) > 0
+}
+
 func schemaEnforcementFromProto(enforcement privatev1.EngineConfig_Enforcement) schema.Enforcement {
 	switch enforcement {
 	case privatev1.EngineConfig_ENFORCEMENT_NONE:
@@ -177,6 +209,12 @@ func testCheck(t *testing.T, tc *privatev1.EngineTestCase, eval evaluator.Evalua
 	t.Helper()
 
 	haveOutputs, err := eval.Check(t.Context(), tc.Inputs)
+	if errors.Is(err, ruletable.ErrPolicyVersionMismatch{}) {
+		// Requests that would combine principal and resource policies from
+		// different policy versions must fail instead of producing a decision.
+		require.ErrorIs(t, err, ruletable.ErrPolicyVersionMismatch{})
+		return
+	}
 	require.NoError(t, err)
 	require.Len(t, haveOutputs, len(tc.WantOutputs))
 
@@ -418,6 +456,12 @@ func TestQueryPlan(t *testing.T) {
 						}
 
 						have, err := eng.Plan(t.Context(), request, opts...)
+						if errors.Is(err, ruletable.ErrPolicyVersionMismatch{}) {
+							// Combining principal and resource policies from
+							// different policy versions must fail.
+							require.ErrorIs(t, err, ruletable.ErrPolicyVersionMismatch{})
+							return
+						}
 						require.NoError(t, err)
 						require.NotNil(t, have)
 						stabiliseOutput(have)

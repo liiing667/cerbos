@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=../.jsonschema/EngineTestCase.schema.json
 ---
-description: Principal policy is resolved using the principal's policy version when it differs from the resource's policy version
+description: A request combining principal and resource policies from different policy versions is rejected
 
 config:
   lenientScopeSearch:
