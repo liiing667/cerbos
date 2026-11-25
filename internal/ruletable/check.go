@@ -110,6 +110,10 @@ func (rt *RuleTable) check(ctx context.Context, tctx tracer.Context, schemaMgr s
 		resourceVersion = evalParams.DefaultPolicyVersion
 	}
 
+	if err := validateScopeIsolation(input.Principal.Id, principalScope, input.Resource.Kind, input.Resource.Id, resourceScope); err != nil {
+		return nil, err
+	}
+
 	trail := newAuditTrail(make(map[string]*policyv1.SourceAttributes))
 	result := newEvalResult(input.Actions, trail)
 

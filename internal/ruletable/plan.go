@@ -118,6 +118,10 @@ func (rt *RuleTable) newPlanRequest(ctx context.Context, schemaMgr schema.Manage
 	resourceScope := evaluator.Scope(input.Resource.Scope, evalParams)
 	resourceVersion := evaluator.PolicyVersion(input.Resource.PolicyVersion, evalParams)
 
+	if err := validateScopeIsolation(input.Principal.Id, principalScope, input.Resource.Kind, "", resourceScope); err != nil {
+		return nil, nil, err
+	}
+
 	principalLookup := rt.GetAllScopes(policyv1.Kind_KIND_PRINCIPAL, principalScope, input.Principal.Id, principalVersion, evalParams.LenientScopeSearch)
 	resourceLookup := rt.GetAllScopes(policyv1.Kind_KIND_RESOURCE, resourceScope, input.Resource.Kind, resourceVersion, evalParams.LenientScopeSearch)
 	principalScopes, principalPolicyFQN := principalLookup.Scopes, principalLookup.PolicyFQN

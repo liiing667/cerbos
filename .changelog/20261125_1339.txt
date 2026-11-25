@@ -1,0 +1,3 @@
+type:fix
+Reject requests that mix principal and resource tenant scopes
+A request whose principal and resource belong to different tenant scopes is now rejected before policy evaluation instead of being decided by combining policies from both tenants. The error retains the principal and resource identities so the rejected request can be attributed correctly. Requests whose scopes are empty or share the same tenant keep their previous behaviour.

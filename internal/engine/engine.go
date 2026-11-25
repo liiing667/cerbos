@@ -149,6 +149,9 @@ func (engine *Engine) Plan(ctx context.Context, input *enginev1.PlanResourcesInp
 		defer span.End()
 
 		checkOpts := evaluator.NewCheckOptions(ctx, engine.conf, opts...)
+		if err := validatePlanScopes(input, checkOpts.EvalParams); err != nil {
+			return nil, nil, err
+		}
 
 		output, trail, err = engine.doPlan(ctx, input, checkOpts)
 		if err != nil {
@@ -219,6 +222,9 @@ func (engine *Engine) Check(ctx context.Context, inputs []*enginev1.CheckInput, 
 		defer span.End()
 
 		checkOpts := evaluator.NewCheckOptions(ctx, engine.conf, opts...)
+		if err := validateCheckScopes(inputs, checkOpts.EvalParams); err != nil {
+			return nil, nil, err
+		}
 
 		// if the number of inputs is less than the threshold, do a serial execution as it is usually faster.
 		// ditto if the worker pool is not initialized
@@ -237,6 +243,38 @@ func (engine *Engine) Check(ctx context.Context, inputs []*enginev1.CheckInput, 
 	metrics.EngineCheckBatchSize().Record(context.Background(), int64(len(inputs)))
 
 	return engine.logCheckDecision(ctx, inputs, outputs, err, trail)
+}
+
+func validateCheckScopes(inputs []*enginev1.CheckInput, params evaluator.EvalParams) error {
+	for _, input := range inputs {
+		principal := input.GetPrincipal()
+		resource := input.GetResource()
+
+		if err := ruletable.ValidateScopeIsolation(
+			principal.GetId(),
+			evaluator.Scope(principal.GetScope(), params),
+			resource.GetKind(),
+			resource.GetId(),
+			evaluator.Scope(resource.GetScope(), params),
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validatePlanScopes(input *enginev1.PlanResourcesInput, params evaluator.EvalParams) error {
+	principal := input.GetPrincipal()
+	resource := input.GetResource()
+
+	return ruletable.ValidateScopeIsolation(
+		principal.GetId(),
+		evaluator.Scope(principal.GetScope(), params),
+		resource.GetKind(),
+		"",
+		evaluator.Scope(resource.GetScope(), params),
+	)
 }
 
 func (engine *Engine) logCheckDecision(ctx context.Context, inputs []*enginev1.CheckInput, outputs []*enginev1.CheckOutput, checkErr error, trail *auditv1.AuditTrail) ([]*enginev1.CheckOutput, error) {

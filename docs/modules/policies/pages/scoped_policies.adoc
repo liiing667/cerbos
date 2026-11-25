@@ -89,6 +89,7 @@ image::decision_flow.png[]
   - With `SCOPE_PERMISSIONS_OVERRIDE_PARENT`, the first policy to return a decision wins for each action.
   - With `SCOPE_PERMISSIONS_REQUIRE_PARENTAL_CONSENT_FOR_ALLOWS`, leaf nodes can only **restrict** access and must conform to parent permissions.
 * There must be no gaps in the policy chain. For example, if you define a policy with scope `a.b.c`, then policies with scopes `a.b`, `a`, and no-scope should also exist in the policy repository.
+* The principal and resource scopes in a request must belong to the same tenant: either scope may be empty, but two non-empty scopes must share the same root. A request that combines different tenants is rejected before policy evaluation.
 * xref:schemas.adoc[Schemas] must be the same among all the policies in the chain. The schemas used to validate the request are taken from the base policy (policy without a scope). Schemas defined in other policies of the chain will be ignored.
 * First match wins (when using `SCOPE_PERMISSIONS_OVERRIDE_PARENT`): Scoped policies are evaluated from the most specific to the least specific. The first policy to produce a decision (ALLOW/DENY) for an action is the winner. The remaining policies cannot override the decision for that particular action.
 * Parent constraints apply (when using `SCOPE_PERMISSIONS_REQUIRE_PARENTAL_CONSENT_FOR_ALLOWS`): The most specific policies can only **restrict permissions** further, not grant new ones.
