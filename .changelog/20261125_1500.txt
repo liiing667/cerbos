@@ -1,0 +1,3 @@
+type:fix
+Reject ambiguous action identities before policy evaluation
+Actions that are blank, have leading or trailing whitespace, or duplicate another action after surrounding whitespace is ignored are now rejected before policy evaluation. Previously such variants could be indexed and audited as different actions, allowing a retry to match an older allow while the caller recorded another action. The error preserves the original action and the action it conflicts with. Valid actions are not trimmed, deduplicated, or reordered, and wildcard and case semantics are unchanged.

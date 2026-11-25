@@ -53,6 +53,17 @@ func NewCerbosService(eng *engine.Engine, auxData *auxdata.AuxData, reqLimits Re
 func (cs *CerbosService) PlanResources(ctx context.Context, request *requestv1.PlanResourcesRequest) (*responsev1.PlanResourcesResponse, error) {
 	log := logging.ReqScopeLog(ctx)
 
+	if action := request.GetAction(); action != "" { //nolint:staticcheck
+		if err := validateRequestActions([]string{action}); err != nil {
+			log.Error("Invalid action", zap.Error(err))
+			return nil, err
+		}
+	}
+	if err := validateRequestActions(request.GetActions()); err != nil {
+		log.Error("Invalid action", zap.Error(err))
+		return nil, err
+	}
+
 	auxData, err := cs.auxData.Extract(ctx, request.AuxData)
 	if err != nil {
 		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
@@ -82,6 +93,8 @@ func (cs *CerbosService) PlanResources(ctx context.Context, request *requestv1.P
 	if err != nil {
 		log.Error("Resources query plan request failed", zap.Error(err))
 		switch {
+		case errors.Is(err, util.ErrInvalidAction):
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
 		case errors.Is(err, compile.PolicyCompilationErr{}):
 			return nil, status.Errorf(codes.FailedPrecondition, "Plan failed due to invalid policy")
 		case errors.Is(err, context.Canceled):
@@ -137,6 +150,11 @@ func (cs *CerbosService) CheckResourceSet(ctx context.Context, req *requestv1.Ch
 		return nil, err
 	}
 
+	if err := validateRequestActions(req.GetActions()); err != nil {
+		log.Error("Invalid action", zap.Error(err))
+		return nil, err
+	}
+
 	auxData, err := cs.auxData.Extract(ctx, req.AuxData)
 	if err != nil {
 		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
@@ -173,10 +191,14 @@ func (cs *CerbosService) CheckResourceSet(ctx context.Context, req *requestv1.Ch
 	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
-		if errors.Is(err, compile.PolicyCompilationErr{}) {
+		switch {
+		case errors.Is(err, util.ErrInvalidAction):
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+		case errors.Is(err, compile.PolicyCompilationErr{}):
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
+		default:
+			return nil, status.Errorf(codes.Internal, "Policy check failed")
 		}
-		return nil, status.Errorf(codes.Internal, "Policy check failed")
 	}
 
 	result := newCheckResourceSetResponseBuilder(req)
@@ -197,69 +219,11 @@ func (cs *CerbosService) CheckResourceBatch(ctx context.Context, req *requestv1.
 		return nil, err
 	}
 
-	auxData, err := cs.auxData.Extract(ctx, req.AuxData)
-	if err != nil {
-		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
-			log.Error(fmt.Sprintf("Failed to extract auxData: %s", extractErr.Description), zap.Error(extractErr.Cause))
-		} else {
-			log.Error("Failed to extract auxData", zap.Error(err))
-		}
-
-		return nil, status.Error(codes.InvalidArgument, "invalid auxData")
-	}
-
-	inputs := make([]*enginev1.CheckInput, len(req.Resources))
-	for i, res := range req.Resources {
-		if err := cs.checkNumActionsLimit(len(res.Actions)); err != nil {
-			log.Error("Request too large", zap.Error(err))
+	for _, res := range req.GetResources() {
+		if err := validateRequestActions(res.GetActions()); err != nil {
+			log.Error("Invalid action", zap.Error(err))
 			return nil, err
 		}
-
-		inputs[i] = &enginev1.CheckInput{
-			RequestId: req.RequestId,
-			Actions:   res.Actions,
-			Principal: req.Principal,
-			Resource:  res.Resource,
-			AuxData:   auxData,
-		}
-	}
-
-	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
-	if err != nil {
-		log.Error("Policy check failed", zap.Error(err))
-		if errors.Is(err, compile.PolicyCompilationErr{}) {
-			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
-		}
-		return nil, status.Errorf(codes.Internal, "Policy check failed")
-	}
-
-	result := &responsev1.CheckResourceBatchResponse{
-		RequestId: req.RequestId,
-		Results:   make([]*responsev1.CheckResourceBatchResponse_ActionEffectMap, len(outputs)),
-	}
-
-	for i, out := range outputs {
-		aem := make(map[string]effectv1.Effect, len(out.Actions))
-		for action, actionEffect := range out.Actions {
-			aem[action] = actionEffect.Effect
-		}
-
-		result.Results[i] = &responsev1.CheckResourceBatchResponse_ActionEffectMap{
-			ResourceId:       inputs[i].Resource.Id,
-			Actions:          aem,
-			ValidationErrors: out.ValidationErrors,
-		}
-	}
-
-	return result, nil
-}
-
-// CheckResources checks a batch of heterogenous resources.
-func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.CheckResourcesRequest) (*responsev1.CheckResourcesResponse, error) {
-	log := logging.ReqScopeLog(ctx)
-	if err := cs.checkNumResourcesLimit(len(req.Resources)); err != nil {
-		log.Error("Request too large", zap.Error(err))
-		return nil, err
 	}
 
 	auxData, err := cs.auxData.Extract(ctx, req.AuxData)
@@ -293,6 +257,84 @@ func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.Chec
 	if err != nil {
 		log.Error("Policy check failed", zap.Error(err))
 		switch {
+		case errors.Is(err, util.ErrInvalidAction):
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
+		case errors.Is(err, compile.PolicyCompilationErr{}):
+			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
+		default:
+			return nil, status.Errorf(codes.Internal, "Policy check failed")
+		}
+	}
+
+	result := &responsev1.CheckResourceBatchResponse{
+		RequestId: req.RequestId,
+		Results:   make([]*responsev1.CheckResourceBatchResponse_ActionEffectMap, len(outputs)),
+	}
+
+	for i, out := range outputs {
+		aem := make(map[string]effectv1.Effect, len(out.Actions))
+		for action, actionEffect := range out.Actions {
+			aem[action] = actionEffect.Effect
+		}
+
+		result.Results[i] = &responsev1.CheckResourceBatchResponse_ActionEffectMap{
+			ResourceId:       inputs[i].Resource.Id,
+			Actions:          aem,
+			ValidationErrors: out.ValidationErrors,
+		}
+	}
+
+	return result, nil
+}
+
+// CheckResources checks a batch of heterogenous resources.
+func (cs *CerbosService) CheckResources(ctx context.Context, req *requestv1.CheckResourcesRequest) (*responsev1.CheckResourcesResponse, error) {
+	log := logging.ReqScopeLog(ctx)
+	if err := cs.checkNumResourcesLimit(len(req.Resources)); err != nil {
+		log.Error("Request too large", zap.Error(err))
+		return nil, err
+	}
+
+	for _, res := range req.GetResources() {
+		if err := validateRequestActions(res.GetActions()); err != nil {
+			log.Error("Invalid action", zap.Error(err))
+			return nil, err
+		}
+	}
+
+	auxData, err := cs.auxData.Extract(ctx, req.AuxData)
+	if err != nil {
+		if extractErr, ok := errors.AsType[auxdata.JWTExtractionError](err); ok {
+			log.Error(fmt.Sprintf("Failed to extract auxData: %s", extractErr.Description), zap.Error(extractErr.Cause))
+		} else {
+			log.Error("Failed to extract auxData", zap.Error(err))
+		}
+
+		return nil, status.Error(codes.InvalidArgument, "invalid auxData")
+	}
+
+	inputs := make([]*enginev1.CheckInput, len(req.Resources))
+	for i, res := range req.Resources {
+		if err := cs.checkNumActionsLimit(len(res.Actions)); err != nil {
+			log.Error("Request too large", zap.Error(err))
+			return nil, err
+		}
+
+		inputs[i] = &enginev1.CheckInput{
+			RequestId: req.RequestId,
+			Actions:   res.Actions,
+			Principal: req.Principal,
+			Resource:  res.Resource,
+			AuxData:   auxData,
+		}
+	}
+
+	outputs, err := cs.eng.Check(logging.ToContext(ctx, log), inputs)
+	if err != nil {
+		log.Error("Policy check failed", zap.Error(err))
+		switch {
+		case errors.Is(err, util.ErrInvalidAction):
+			return nil, status.Errorf(codes.InvalidArgument, "%s", err)
 		case errors.Is(err, compile.PolicyCompilationErr{}):
 			return nil, status.Errorf(codes.FailedPrecondition, "Check failed due to invalid policy")
 		case errors.Is(err, context.Canceled):
@@ -364,6 +406,14 @@ func (cs *CerbosService) checkNumActionsLimit(n int) error {
 	if n > int(cs.reqLimits.MaxActionsPerResource) {
 		return status.Errorf(codes.InvalidArgument,
 			"number of actions (%d) exceeds configured limit (%d)", n, cs.reqLimits.MaxActionsPerResource)
+	}
+
+	return nil
+}
+
+func validateRequestActions(actions []string) error {
+	if err := util.ValidateActions(actions); err != nil {
+		return status.Errorf(codes.InvalidArgument, "%s", err)
 	}
 
 	return nil

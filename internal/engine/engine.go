@@ -26,6 +26,7 @@ import (
 	"github.com/cerbos/cerbos/internal/observability/tracing"
 	"github.com/cerbos/cerbos/internal/ruletable"
 	"github.com/cerbos/cerbos/internal/schema"
+	"github.com/cerbos/cerbos/internal/util"
 )
 
 var _ evaluator.Evaluator = (*Engine)(nil)
@@ -144,6 +145,10 @@ func (engine *Engine) submitWork(ctx context.Context, work workIn) error {
 }
 
 func (engine *Engine) Plan(ctx context.Context, input *enginev1.PlanResourcesInput, opts ...evaluator.CheckOpt) (*enginev1.PlanResourcesOutput, error) {
+	if err := validatePlanInputActions(input); err != nil {
+		return nil, err
+	}
+
 	output, trail, err := metrics.RecordDuration3(metrics.EnginePlanLatency(), func() (output *enginev1.PlanResourcesOutput, trail *auditv1.AuditTrail, err error) {
 		ctx, span := tracing.StartSpan(ctx, "engine.Plan")
 		defer span.End()
@@ -214,6 +219,10 @@ func (engine *Engine) logPlanDecision(ctx context.Context, input *enginev1.PlanR
 }
 
 func (engine *Engine) Check(ctx context.Context, inputs []*enginev1.CheckInput, opts ...evaluator.CheckOpt) ([]*enginev1.CheckOutput, error) {
+	if err := validateCheckInputActions(inputs); err != nil {
+		return nil, err
+	}
+
 	outputs, trail, err := metrics.RecordDuration3(metrics.EngineCheckLatency(), func() (outputs []*enginev1.CheckOutput, trail *auditv1.AuditTrail, err error) {
 		ctx, span := tracing.StartSpan(ctx, "engine.Check")
 		defer span.End()
@@ -237,6 +246,34 @@ func (engine *Engine) Check(ctx context.Context, inputs []*enginev1.CheckInput, 
 	metrics.EngineCheckBatchSize().Record(context.Background(), int64(len(inputs)))
 
 	return engine.logCheckDecision(ctx, inputs, outputs, err, trail)
+}
+
+func validateCheckInputActions(inputs []*enginev1.CheckInput) error {
+	for _, input := range inputs {
+		if input == nil {
+			continue
+		}
+
+		if err := util.ValidateActions(input.GetActions()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validatePlanInputActions(input *enginev1.PlanResourcesInput) error {
+	if input == nil {
+		return nil
+	}
+
+	if action := input.GetAction(); action != "" { //nolint:staticcheck
+		if err := util.ValidateAction(action); err != nil {
+			return err
+		}
+	}
+
+	return util.ValidateActions(input.GetActions())
 }
 
 func (engine *Engine) logCheckDecision(ctx context.Context, inputs []*enginev1.CheckInput, outputs []*enginev1.CheckOutput, checkErr error, trail *auditv1.AuditTrail) ([]*enginev1.CheckOutput, error) {

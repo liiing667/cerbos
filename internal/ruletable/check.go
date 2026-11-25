@@ -33,6 +33,7 @@ import (
 	"github.com/cerbos/cerbos/internal/ruletable/index"
 	"github.com/cerbos/cerbos/internal/ruletable/internal"
 	"github.com/cerbos/cerbos/internal/schema"
+	"github.com/cerbos/cerbos/internal/util"
 )
 
 func (rt *RuleTable) Check(ctx context.Context, conf *evaluator.Conf, schemaMgr schema.Manager, inputs []*enginev1.CheckInput, opts ...evaluator.CheckOpt) ([]*enginev1.CheckOutput, *auditv1.AuditTrail, error) {
@@ -56,6 +57,14 @@ func (rt *RuleTable) Check(ctx context.Context, conf *evaluator.Conf, schemaMgr 
 }
 
 func (rt *RuleTable) checkWithAuditTrail(ctx context.Context, tctx tracer.Context, schemaMgr schema.Manager, evalParams evaluator.EvalParams, input *enginev1.CheckInput) (*enginev1.CheckOutput, *auditv1.AuditTrail, error) {
+	if input == nil {
+		return nil, nil, errors.New("check input must not be nil")
+	}
+
+	if err := util.ValidateActions(input.GetActions()); err != nil {
+		return nil, nil, err
+	}
+
 	result, err := rt.check(ctx, tctx, schemaMgr, evalParams, input)
 	if err != nil {
 		return nil, nil, err
