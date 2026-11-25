@@ -120,6 +120,14 @@ func (rt *RuleTable) check(ctx context.Context, tctx tracer.Context, schemaMgr s
 	principalPolicyKey := namer.PolicyKeyFromFQN(principalPolicyFQN)
 	resourcePolicyKey := namer.PolicyKeyFromFQN(resourcePolicyFQN)
 
+	if err := rt.checkScope(principalScope, principalVersion, principalScopes, evalParams.LenientScopeSearch); err != nil {
+		return nil, err
+	}
+
+	if err := rt.checkScope(resourceScope, resourceVersion, resourceScopes, evalParams.LenientScopeSearch); err != nil {
+		return nil, err
+	}
+
 	if len(principalScopes) == 0 && len(resourceScopes) == 0 {
 		return result, nil
 	}

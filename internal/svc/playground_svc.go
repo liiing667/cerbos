@@ -178,6 +178,9 @@ func (cs *CerbosPlaygroundService) PlaygroundEvaluate(ctx context.Context, req *
 	output, err := eng.Check(procCtx, inputs)
 	if err != nil {
 		log.Error("Engine check failed", zap.Error(err))
+		if scopeErr := unknownScopeStatus(err); scopeErr != nil {
+			return nil, scopeErr
+		}
 		return nil, status.Errorf(codes.Internal, "policy check failed")
 	}
 

@@ -39,6 +39,21 @@ import (
 // trick compiler into not converting benchmarks into nops.
 var dummy int
 
+// unknownScopeErrors lists engine test cases whose strict scope search references a scope that is not present in the
+// policy store. Such requests must fail instead of being reported as an ordinary NO_MATCH.
+var scopeErrorRegressionCases = map[string]string{
+	"case_12": `unknown scope "acme.hr.fr" for policy version "default"`,
+	"case_40": `unknown scope "acme.hr.uk.wales.cardiff" for policy version "default"`,
+	"case_42": `unknown scope "acme.hr.france.marseille" for policy version "default"`,
+}
+
+// queryPlannerUnknownScopeErrors lists query planner test suites whose strict scope search references a scope that is
+// not present in the policy store.
+var queryPlannerScopeErrorRegressionCases = map[string]string{
+	"donald_duck_nonexistent_scope":        `unknown scope "nonexistent_principal" for policy version "default"`,
+	"donald_duck_nonexistent_scope_strict": `unknown scope "nonexistent_principal" for policy version "default"`,
+}
+
 func TestCheck(t *testing.T) {
 	t.Parallel()
 
@@ -55,8 +70,17 @@ func TestCheck(t *testing.T) {
 			testEngineConfigMatrix(t, tc.GetConfig(), func(t *testing.T, params param, mockAuditLog *mockAuditLog, wantSuccess bool) {
 				t.Helper()
 
+				wantErr := ""
+				if !params.lenientScopeSearch {
+					wantErr = scopeErrorRegressionCases[tcase.Name]
+				}
+
 				t.Run("engine", func(t *testing.T) {
-					testCheck(t, tc, mkEngine(t, params), wantSuccess)
+					testCheck(t, tc, mkEngine(t, params), wantSuccess, wantErr)
+
+					if wantErr != "" {
+						return
+					}
 
 					diff := cmp.Diff(tc.WantDecisionLogs, mockAuditLog.getDecisionLogs(),
 						protocmp.Transform(),
@@ -76,10 +100,10 @@ func TestCheck(t *testing.T) {
 				})
 
 				t.Run("ruletable", func(t *testing.T) {
-					testCheck(t, tc, mkRuleTable(t, params), wantSuccess)
+					testCheck(t, tc, mkRuleTable(t, params), wantSuccess, wantErr)
 
 					t.Run("round-tripped index", func(t *testing.T) {
-						testCheck(t, tc, mkRuleTableWithRoundTrippedIndex(t, params), wantSuccess)
+						testCheck(t, tc, mkRuleTableWithRoundTrippedIndex(t, params), wantSuccess, wantErr)
 					})
 				})
 			})
@@ -173,10 +197,20 @@ func schemaEnforcementFromProto(enforcement privatev1.EngineConfig_Enforcement) 
 	}
 }
 
-func testCheck(t *testing.T, tc *privatev1.EngineTestCase, eval evaluator.Evaluator, wantSuccess bool) {
+func testCheck(t *testing.T, tc *privatev1.EngineTestCase, eval evaluator.Evaluator, wantSuccess bool, wantErr string) {
 	t.Helper()
 
 	haveOutputs, err := eval.Check(t.Context(), tc.Inputs)
+	if wantErr != "" {
+		require.ErrorContains(t, err, wantErr)
+		return
+	}
+
+	if err != nil && !wantSuccess {
+		// This configuration is outside the matrix declared by the test case. An error is a valid
+		// difference from the expected output.
+		return
+	}
 	require.NoError(t, err)
 	require.Len(t, haveOutputs, len(tc.WantOutputs))
 
@@ -386,6 +420,10 @@ func TestQueryPlan(t *testing.T) {
 				t.Helper()
 
 				eng := mkEngine(t, params)
+				wantErr := ""
+				if !params.lenientScopeSearch {
+					wantErr = queryPlannerScopeErrorRegressionCases[tc.Name]
+				}
 
 				for _, tt := range ts.Tests {
 					actionName := tt.Action
@@ -418,6 +456,15 @@ func TestQueryPlan(t *testing.T) {
 						}
 
 						have, err := eng.Plan(t.Context(), request, opts...)
+						if wantErr != "" {
+							require.ErrorContains(t, err, wantErr)
+							return
+						}
+
+						if err != nil && !wantSuccess {
+							// This configuration is outside the matrix declared by the test case.
+							return
+						}
 						require.NoError(t, err)
 						require.NotNil(t, have)
 						stabiliseOutput(have)

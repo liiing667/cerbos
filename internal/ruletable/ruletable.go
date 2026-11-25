@@ -51,6 +51,24 @@ const (
 	noPolicyMatch           = "NO_MATCH"
 )
 
+// UnknownScopeError is returned when a request references a scope that is not present in the policy store.
+type UnknownScopeError = evaluator.UnknownScopeError
+
+// ScopeNotFoundError is an alias for UnknownScopeError.
+type ScopeNotFoundError = evaluator.ScopeNotFoundError
+
+// MissingScopeError is an alias for UnknownScopeError.
+type MissingScopeError = evaluator.MissingScopeError
+
+// ErrUnknownScope is returned when a request references a scope that is not present in the policy store.
+var ErrUnknownScope = evaluator.ErrUnknownScope
+
+// ErrScopeNotFound is an alias for ErrUnknownScope.
+var ErrScopeNotFound = evaluator.ErrScopeNotFound
+
+// ErrMissingScope is an alias for ErrUnknownScope.
+var ErrMissingScope = evaluator.ErrMissingScope
+
 func NewProtoRuletable() *runtimev1.RuleTable {
 	return &runtimev1.RuleTable{
 		Rules:                   []*runtimev1.RuleTable_RuleRow{},
@@ -580,6 +598,7 @@ type RuleTable struct {
 	idx                   *index.Index
 	scopePermsTracker     *scopeperms.Tracker
 	scopeScopePermissions map[string]policyv1.ScopePermissions
+	knownScopes           map[string]map[namer.ModuleID]struct{}
 	policyDerivedRoles    map[namer.ModuleID]map[string]*WrappedRunnableDerivedRole
 	programCache          *ProgramCache
 	planExprCache         *planner.ExprCache
@@ -799,6 +818,7 @@ func (rt *RuleTable) initBuildState() {
 	rt.policyDerivedRoles = make(map[namer.ModuleID]map[string]*WrappedRunnableDerivedRole)
 	rt.scopePermsTracker = scopeperms.NewTracker()
 	rt.scopeScopePermissions = make(map[string]policyv1.ScopePermissions)
+	rt.knownScopes = make(map[string]map[namer.ModuleID]struct{})
 }
 
 // finalizeBuild indexes the parent roles and releases transient build state once all rows have been indexed.
@@ -820,6 +840,8 @@ func (rt *RuleTable) finalizeBuild() error {
 	if err := rt.idx.IndexParentRoles(rt.VersionScopeParentRoles); err != nil {
 		return err
 	}
+
+	rt.buildKnownScopes()
 
 	debug.FreeOSMemory()
 
@@ -880,12 +902,47 @@ func (rt *RuleTable) ingestPolicy(rps *runtimev1.RunnablePolicySet) error {
 		return fmt.Errorf("failed to index and purge rules: %w", err)
 	}
 
+	if rt.Meta[namer.GenModuleIDFromFQN(rps.GetFqn()).RawValue()] != nil {
+		rt.addKnownScope(rps.GetFqn())
+	}
+
 	nilChecked := func(e *runtimev1.Expr) { e.Checked = nil }
 	for _, row := range rows {
 		conditions.WalkExprs(row, nilChecked)
 	}
 
 	return nil
+}
+
+func (rt *RuleTable) buildKnownScopes() {
+	clear(rt.knownScopes)
+	for _, meta := range rt.Meta {
+		rt.addKnownScope(meta.GetFqn())
+	}
+}
+
+func (rt *RuleTable) addKnownScope(fqn string) {
+	scope := namer.ScopeFromFQN(fqn)
+	fqns, ok := rt.knownScopes[scope]
+	if !ok {
+		fqns = make(map[namer.ModuleID]struct{})
+		rt.knownScopes[scope] = fqns
+	}
+
+	fqns[namer.GenModuleIDFromFQN(fqn)] = struct{}{}
+}
+
+func (rt *RuleTable) removeKnownScope(fqn string) {
+	scope := namer.ScopeFromFQN(fqn)
+	fqns, ok := rt.knownScopes[scope]
+	if !ok {
+		return
+	}
+
+	delete(fqns, namer.GenModuleIDFromFQN(fqn))
+	if len(fqns) == 0 {
+		delete(rt.knownScopes, scope)
+	}
 }
 
 func (rt *RuleTable) indexRules(rules []*runtimev1.RuleTable_RuleRow) error {
@@ -982,6 +1039,50 @@ func (rt *RuleTable) GetAllScopes(pt policyv1.Kind, scope, name, version string,
 	}
 
 	return res
+}
+
+// scopeExists reports whether the policy store contains any policy in the given scope. The policy version, kind and
+// name are deliberately ignored: a scope is known if any policy was defined in it. This keeps rule-less policies and
+// scopes that only contain role or principal policies usable for inheritance.
+func (rt *RuleTable) scopeExists(scope string) bool {
+	if scope == "" {
+		return true
+	}
+
+	for moduleID := range rt.knownScopes[scope] {
+		if rt.Meta[moduleID.RawValue()] != nil {
+			return true
+		}
+	}
+
+	for _, meta := range rt.Meta {
+		if namer.ScopeFromFQN(meta.GetFqn()) == scope {
+			return true
+		}
+	}
+
+	for _, scopes := range rt.VersionScopeParentRoles {
+		if scopes.GetScopes()[scope] != nil {
+			return true
+		}
+	}
+
+	return false
+}
+
+// checkScope returns an UnknownScopeError when the requested scope is missing from the policy store and lenient
+// scope search is disabled. A scope which exists but has no matching policy for the requested kind, name or version
+// is left to the normal scope resolution rules, so known empty scopes and valid inheritance continue to work.
+func (rt *RuleTable) checkScope(scope, version string, resolvedScopes []string, lenient bool) error {
+	if lenient || scope == "" || len(resolvedScopes) > 0 || rt.scopeExists(scope) {
+		return nil
+	}
+
+	return &UnknownScopeError{
+		Scope:         scope,
+		PolicyVersion: version,
+		Version:       version,
+	}
 }
 
 type scopeNode struct {

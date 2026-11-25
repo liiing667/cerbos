@@ -33,6 +33,14 @@ var planCheckResidualErrorCases = map[string]string{
 	"case_55": "the cel_errors policies have conditions that fail on purpose",
 }
 
+// planCheckUnknownScopeCases lists engine test cases whose strict scope search references a scope that is not present
+// in the policy store. Both Check and Plan fail for these inputs instead of producing a decision to compare.
+var planCheckScopeErrorRegressionCases = map[string]struct{}{
+	"case_12": {},
+	"case_40": {},
+	"case_42": {},
+}
+
 type planCheckCounts struct {
 	matched, indeterminate int
 }
@@ -55,6 +63,10 @@ func TestPlanCheckEquivalence(t *testing.T) {
 
 			tc := test.Parse[privatev1.EngineTestCase](t, tcase.Input)
 			for _, lenientScopeSearch := range tc.GetConfig().GetLenientScopeSearch() {
+				if _, ok := planCheckScopeErrorRegressionCases[tcase.Name]; ok && !lenientScopeSearch {
+					continue
+				}
+
 				for _, strictEvaluation := range tc.GetConfig().GetStrictEvaluation() {
 					conf := planCheckConf(tc.GetConfig(), lenientScopeSearch, strictEvaluation)
 

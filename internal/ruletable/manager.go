@@ -287,6 +287,7 @@ func (mgr *Manager) doDeletePolicy(moduleID namer.ModuleID) error {
 	delete(mgr.Schemas, moduleID.RawValue())
 	delete(mgr.Meta, moduleID.RawValue())
 	delete(mgr.policyDerivedRoles, moduleID)
+	mgr.removeKnownScope(meta.GetFqn())
 
 	return nil
 }

@@ -123,6 +123,14 @@ func (rt *RuleTable) newPlanRequest(ctx context.Context, schemaMgr schema.Manage
 	principalScopes, principalPolicyFQN := principalLookup.Scopes, principalLookup.PolicyFQN
 	resourceScopes, resourcePolicyFQN := resourceLookup.Scopes, resourceLookup.PolicyFQN
 
+	if err := rt.checkScope(principalScope, principalVersion, principalScopes, evalParams.LenientScopeSearch); err != nil {
+		return nil, nil, err
+	}
+
+	if err := rt.checkScope(resourceScope, resourceVersion, resourceScopes, evalParams.LenientScopeSearch); err != nil {
+		return nil, nil, err
+	}
+
 	p := &planRequest{
 		input:            input,
 		evalParams:       evalParams,

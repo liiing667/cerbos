@@ -1,0 +1,3 @@
+type:fix
+Fail requests that reference unknown scopes
+CheckResources and PlanResources now return an error containing the requested scope and policy version when lenient scope search is disabled and the scope has no policies in the store, instead of reporting an ordinary NO_MATCH. Known scopes that only contain rule-less policies or other policy kinds continue to work, and lenient scope search still falls back to parent scopes.
